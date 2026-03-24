@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { User } from './types';
 import Icon from '@/components/ui/icon';
 
+const SEND_CODE_URL = 'https://functions.poehali.dev/338acfb8-efee-4a25-bce5-edec24b21840';
+const VERIFY_CODE_URL = 'https://functions.poehali.dev/b905d250-3aa2-4177-858d-97f7deb1602e';
+
 interface AuthScreenProps {
   onAuth: (user: User) => void;
 }
 
 type AuthStep = 'phone' | 'code' | 'register' | 'username';
-
-const FAKE_CODE = '472851';
 
 export default function AuthScreen({ onAuth }: AuthScreenProps) {
   const [step, setStep] = useState<AuthStep>('phone');
@@ -19,10 +20,19 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sentCode] = useState(FAKE_CODE);
-  const [showCode, setShowCode] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
 
-  const handlePhoneSubmit = () => {
+  const startResendTimer = () => {
+    setResendTimer(60);
+    const interval = setInterval(() => {
+      setResendTimer((t) => {
+        if (t <= 1) { clearInterval(interval); return 0; }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
+  const handlePhoneSubmit = async () => {
     setError('');
     if (phone.replace(/\D/g, '').length < 10) {
       setError('Введите корректный номер телефона');
@@ -33,18 +43,49 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const res = await fetch(SEND_CODE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Ошибка отправки кода');
+        return;
+      }
       setStep('code');
-    }, 1200);
+      startResendTimer();
+    } catch {
+      setError('Ошибка соединения. Проверьте интернет.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCodeSubmit = () => {
+  const handleCodeSubmit = async () => {
     setError('');
-    if (code === sentCode) {
+    if (code.length !== 6) {
+      setError('Введите 6-значный код');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(VERIFY_CODE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, email, code }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Неверный код');
+        return;
+      }
       setStep('register');
-    } else {
-      setError('Неверный код. Проверьте почту');
+    } catch {
+      setError('Ошибка соединения. Проверьте интернет.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -113,6 +154,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
           className="rounded-2xl p-6"
           style={{ background: 'var(--g-bg2)', border: '1px solid var(--g-border)' }}
         >
+          {/* STEP 1: Phone + Email */}
           {step === 'phone' && (
             <div className="space-y-4 animate-fade-in">
               <div>
@@ -120,7 +162,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                   Вход / Регистрация
                 </h2>
                 <p className="text-sm" style={{ color: 'var(--g-text-dim)' }}>
-                  Введите телефон и email для получения кода
+                  Введите телефон и email — на почту придёт код
                 </p>
               </div>
 
@@ -136,11 +178,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="w-full pl-9 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-                    style={{
-                      background: 'var(--g-surface)',
-                      border: '1px solid var(--g-border)',
-                      color: 'var(--g-text)',
-                    }}
+                    style={{ background: 'var(--g-surface)', border: '1px solid var(--g-border)', color: 'var(--g-text)' }}
                     onFocus={(e) => (e.target.style.borderColor = 'var(--g-green)')}
                     onBlur={(e) => (e.target.style.borderColor = 'var(--g-border)')}
                     onKeyDown={(e) => e.key === 'Enter' && handlePhoneSubmit()}
@@ -160,11 +198,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-9 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-                    style={{
-                      background: 'var(--g-surface)',
-                      border: '1px solid var(--g-border)',
-                      color: 'var(--g-text)',
-                    }}
+                    style={{ background: 'var(--g-surface)', border: '1px solid var(--g-border)', color: 'var(--g-text)' }}
                     onFocus={(e) => (e.target.style.borderColor = 'var(--g-green)')}
                     onBlur={(e) => (e.target.style.borderColor = 'var(--g-border)')}
                     onKeyDown={(e) => e.key === 'Enter' && handlePhoneSubmit()}
@@ -172,17 +206,20 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                 </div>
               </div>
 
-              {error && (
-                <p className="text-sm text-red-400">{error}</p>
-              )}
+              {error && <p className="text-sm text-red-400">{error}</p>}
 
               <button
                 onClick={handlePhoneSubmit}
                 disabled={loading}
-                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95"
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
                 style={{ background: 'var(--g-green)', color: '#fff' }}
               >
-                {loading ? 'Отправка кода...' : 'Получить код →'}
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Отправка...
+                  </span>
+                ) : 'Получить код →'}
               </button>
 
               <p className="text-xs text-center" style={{ color: 'var(--g-text-faint)' }}>
@@ -191,6 +228,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
             </div>
           )}
 
+          {/* STEP 2: Code */}
           {step === 'code' && (
             <div className="space-y-4 animate-fade-in">
               <div>
@@ -198,32 +236,18 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                   Введите код
                 </h2>
                 <p className="text-sm" style={{ color: 'var(--g-text-dim)' }}>
-                  Код отправлен на {email}
+                  Код отправлен на <span style={{ color: 'var(--g-green)' }}>{email}</span>
                 </p>
               </div>
 
-              {/* Demo hint */}
               <div
-                className="rounded-xl p-3 text-sm"
+                className="rounded-xl p-3 text-sm flex items-center gap-2"
                 style={{ background: 'rgba(61,186,110,0.08)', border: '1px solid rgba(61,186,110,0.2)' }}
               >
-                <div className="flex items-center justify-between">
-                  <span style={{ color: 'var(--g-green)' }}>
-                    🔒 Демо-режим
-                  </span>
-                  <button
-                    onClick={() => setShowCode(!showCode)}
-                    className="text-xs underline"
-                    style={{ color: 'var(--g-text-dim)' }}
-                  >
-                    {showCode ? 'скрыть' : 'показать код'}
-                  </button>
-                </div>
-                {showCode && (
-                  <p className="mt-1 text-xl font-mono font-bold" style={{ color: 'var(--g-green)' }}>
-                    {sentCode}
-                  </p>
-                )}
+                <Icon name="Mail" size={14} style={{ color: 'var(--g-green)', flexShrink: 0 }} />
+                <span style={{ color: 'var(--g-text-dim)' }}>
+                  Проверьте входящие и папку «Спам»
+                </span>
               </div>
 
               <div>
@@ -232,16 +256,13 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                 </label>
                 <input
                   type="text"
+                  inputMode="numeric"
                   maxLength={6}
                   placeholder="000000"
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                   className="w-full px-4 py-3 rounded-xl text-2xl font-mono text-center tracking-widest outline-none transition-all"
-                  style={{
-                    background: 'var(--g-surface)',
-                    border: '1px solid var(--g-border)',
-                    color: 'var(--g-text)',
-                  }}
+                  style={{ background: 'var(--g-surface)', border: '1px solid var(--g-border)', color: 'var(--g-text)' }}
                   onFocus={(e) => (e.target.style.borderColor = 'var(--g-green)')}
                   onBlur={(e) => (e.target.style.borderColor = 'var(--g-border)')}
                   onKeyDown={(e) => e.key === 'Enter' && handleCodeSubmit()}
@@ -253,22 +274,44 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
 
               <button
                 onClick={handleCodeSubmit}
-                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95"
+                disabled={loading || code.length !== 6}
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
                 style={{ background: 'var(--g-green)', color: '#fff' }}
               >
-                Подтвердить
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Проверка...
+                  </span>
+                ) : 'Подтвердить'}
               </button>
 
-              <button
-                onClick={() => setStep('phone')}
-                className="w-full py-2 text-sm"
-                style={{ color: 'var(--g-text-dim)' }}
-              >
-                ← Изменить данные
-              </button>
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => { setStep('phone'); setCode(''); setError(''); }}
+                  className="text-sm"
+                  style={{ color: 'var(--g-text-dim)' }}
+                >
+                  ← Изменить данные
+                </button>
+                {resendTimer > 0 ? (
+                  <span className="text-xs" style={{ color: 'var(--g-text-faint)' }}>
+                    Повтор через {resendTimer}с
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => { setCode(''); setError(''); handlePhoneSubmit(); }}
+                    className="text-xs"
+                    style={{ color: 'var(--g-green)' }}
+                  >
+                    Отправить снова
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
+          {/* STEP 3: Name */}
           {step === 'register' && (
             <div className="space-y-4 animate-fade-in">
               <div>
@@ -292,11 +335,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full pl-9 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-                    style={{
-                      background: 'var(--g-surface)',
-                      border: '1px solid var(--g-border)',
-                      color: 'var(--g-text)',
-                    }}
+                    style={{ background: 'var(--g-surface)', border: '1px solid var(--g-border)', color: 'var(--g-text)' }}
                     onFocus={(e) => (e.target.style.borderColor = 'var(--g-green)')}
                     onBlur={(e) => (e.target.style.borderColor = 'var(--g-border)')}
                     autoFocus
@@ -317,6 +356,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
             </div>
           )}
 
+          {/* STEP 4: Username */}
           {step === 'username' && (
             <div className="space-y-4 animate-fade-in">
               <div>
@@ -345,11 +385,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                     value={username}
                     onChange={(e) => setUsername(e.target.value.replace('@', '').replace(/[^a-zA-Z0-9_]/g, ''))}
                     className="w-full pl-8 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-                    style={{
-                      background: 'var(--g-surface)',
-                      border: '1px solid var(--g-border)',
-                      color: 'var(--g-text)',
-                    }}
+                    style={{ background: 'var(--g-surface)', border: '1px solid var(--g-border)', color: 'var(--g-text)' }}
                     onFocus={(e) => (e.target.style.borderColor = 'var(--g-green)')}
                     onBlur={(e) => (e.target.style.borderColor = 'var(--g-border)')}
                     autoFocus
@@ -376,7 +412,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
 
         {/* Steps indicator */}
         <div className="flex justify-center gap-2 mt-6">
-          {(['phone', 'code', 'register', 'username'] as AuthStep[]).map((s, i) => (
+          {(['phone', 'code', 'register', 'username'] as AuthStep[]).map((s) => (
             <div
               key={s}
               className="h-1.5 rounded-full transition-all duration-300"
