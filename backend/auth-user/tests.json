@@ -1,0 +1,27 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Check phone not exists",
+      "method": "GET",
+      "path": "/?phone=%2B79990000000",
+      "expectedStatus": 200,
+      "expectedBody": {"exists": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Missing fields on register",
+      "method": "POST",
+      "path": "/",
+      "body": {"name": "Test"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

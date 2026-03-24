@@ -4,6 +4,7 @@ import Icon from '@/components/ui/icon';
 
 const SEND_CODE_URL = 'https://functions.poehali.dev/338acfb8-efee-4a25-bce5-edec24b21840';
 const VERIFY_CODE_URL = 'https://functions.poehali.dev/b905d250-3aa2-4177-858d-97f7deb1602e';
+const AUTH_USER_URL = 'https://functions.poehali.dev/d2522624-4c1b-478e-939f-16d6c257ee4e';
 
 interface AuthScreenProps {
   onAuth: (user: User) => void;
@@ -21,6 +22,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [isExistingUser, setIsExistingUser] = useState(false);
 
   const startResendTimer = () => {
     setResendTimer(60);
@@ -44,6 +46,12 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
     }
     setLoading(true);
     try {
+      // Проверяем существует ли аккаунт с таким телефоном
+      const checkRes = await fetch(`${AUTH_USER_URL}?phone=${encodeURIComponent(phone)}`);
+      const checkData = await checkRes.json();
+      setIsExistingUser(checkData.exists === true);
+
+      // Отправляем код на email
       const res = await fetch(SEND_CODE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -81,6 +89,15 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
         setError(data.error || 'Неверный код');
         return;
       }
+      if (isExistingUser) {
+        // Существующий пользователь — загружаем из БД и входим
+        const userRes = await fetch(`${AUTH_USER_URL}?phone=${encodeURIComponent(phone)}`);
+        const userData = await userRes.json();
+        if (userData.exists && userData.user) {
+          onAuth({ ...userData.user, isOnline: true });
+          return;
+        }
+      }
       setStep('register');
     } catch {
       setError('Ошибка соединения. Проверьте интернет.');
@@ -98,7 +115,7 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
     setStep('username');
   };
 
-  const handleUsernameSubmit = () => {
+  const handleUsernameSubmit = async () => {
     setError('');
     const uname = username.replace('@', '').trim();
     if (uname.length < 3) {
@@ -109,16 +126,24 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
       setError('@адрес может содержать только латинские буквы, цифры и _');
       return;
     }
-    const user: User = {
-      id: Date.now().toString(),
-      name: name.trim(),
-      username: uname,
-      phone,
-      email,
-      bio: '',
-      isOnline: true,
-    };
-    onAuth(user);
+    setLoading(true);
+    try {
+      const res = await fetch(AUTH_USER_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), username: uname, phone, email, bio: '' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Ошибка регистрации');
+        return;
+      }
+      onAuth({ ...data.user, isOnline: true });
+    } catch {
+      setError('Ошибка соединения. Проверьте интернет.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -240,11 +265,21 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
                 </p>
               </div>
 
+              {isExistingUser && (
+                <div
+                  className="rounded-xl p-3 text-sm flex items-center gap-2"
+                  style={{ background: 'rgba(61,186,110,0.1)', border: '1px solid rgba(61,186,110,0.3)' }}
+                >
+                  <Icon name="UserCheck" size={14} style={{ color: 'var(--g-green)', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--g-green)' }}>Аккаунт найден — введите код для входа</span>
+                </div>
+              )}
+
               <div
                 className="rounded-xl p-3 text-sm flex items-center gap-2"
-                style={{ background: 'rgba(61,186,110,0.08)', border: '1px solid rgba(61,186,110,0.2)' }}
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--g-border)' }}
               >
-                <Icon name="Mail" size={14} style={{ color: 'var(--g-green)', flexShrink: 0 }} />
+                <Icon name="Mail" size={14} style={{ color: 'var(--g-text-faint)', flexShrink: 0 }} />
                 <span style={{ color: 'var(--g-text-dim)' }}>
                   Проверьте входящие и папку «Спам»
                 </span>
@@ -401,10 +436,16 @@ export default function AuthScreen({ onAuth }: AuthScreenProps) {
 
               <button
                 onClick={handleUsernameSubmit}
-                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95"
+                disabled={loading}
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
                 style={{ background: 'var(--g-green)', color: '#fff' }}
               >
-                Войти в Гылекор 🚀
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Создание аккаунта...
+                  </span>
+                ) : 'Войти в Гылекор 🚀'}
               </button>
             </div>
           )}
